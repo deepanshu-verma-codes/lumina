@@ -1,0 +1,12 @@
+:root {
+    --primary-color: #625df5;
+    --primary-hover: #4e4ad9;
+    --bg-dark: #121212;
+    --bg-surface: #1e1e1e;
+    --text-main: #ffffff;
+    --text-muted: #a0a0a0;
+    --danger: #ff4d4d;
+    --success: #00c853;
+    --border-radius: 12px;
+    --transition-speed: 0.3s;
+}
