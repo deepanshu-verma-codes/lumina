@@ -72,25 +72,69 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             stream = displayStream; 
 
-            // 2. Audio Merging
-            let finalTracks = [...displayStream.getTracks()];
+            // 2. Audio Merging with AudioContext
+            let micStream = null;
             if (micToggle.checked) {
                 try {
-                    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    finalTracks.push(...micStream.getAudioTracks());
+                    micStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        } 
+                    });
                     document.getElementById('mic-status').classList.remove('hidden');
                 } catch (e) { console.warn('Mic denied'); }
             }
 
+            // Merge tracks using AudioContext
+            const audioContext = new AudioContext();
+            const destination = audioContext.createMediaStreamDestination();
+            let hasAudio = false;
+
+            if (displayStream.getAudioTracks().length > 0) {
+                const source = audioContext.createMediaStreamSource(new MediaStream([displayStream.getAudioTracks()[0]]));
+                source.connect(destination);
+                hasAudio = true;
+            }
+
+            if (micStream && micStream.getAudioTracks().length > 0) {
+                const source = audioContext.createMediaStreamSource(new MediaStream([micStream.getAudioTracks()[0]]));
+                source.connect(destination);
+                hasAudio = true;
+            }
+
             // 3. Optional Webcam Composition
-            let recordingStream = new MediaStream(finalTracks);
+            let recordingStream;
             if (cameraToggle.checked) {
                 try {
                     webcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 320 } });
-                    recordingStream = startCanvasComposition(displayStream, webcamStream);
+                    const canvasStream = startCanvasComposition(displayStream, webcamStream);
+                    
+                    // Combine canvas video with merged audio
+                    const finalTracks = [...canvasStream.getVideoTracks()];
+                    if (hasAudio) {
+                        finalTracks.push(...destination.stream.getAudioTracks());
+                    }
+                    recordingStream = new MediaStream(finalTracks);
                     document.getElementById('cam-status').classList.remove('hidden');
-                } catch (e) { console.warn('Webcam denied'); }
+                } catch (e) { 
+                    console.warn('Webcam denied'); 
+                    const finalTracks = [...displayStream.getVideoTracks()];
+                    if (hasAudio) finalTracks.push(...destination.stream.getAudioTracks());
+                    recordingStream = new MediaStream(finalTracks);
+                }
+            } else {
+                const finalTracks = [...displayStream.getVideoTracks()];
+                if (hasAudio) {
+                    finalTracks.push(...destination.stream.getAudioTracks());
+                }
+                recordingStream = new MediaStream(finalTracks);
             }
+
+            // Store for cleanup
+            recordingStream.audioContext = audioContext;
+            recordingStream.micStream = micStream;
 
             // 4. Recorder Initialization
             chunks = [];
@@ -121,6 +165,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 renderHistory();
                 resetToSetup();
+
+                // Cleanup tracks and AudioContext
+                if (recordingStream.audioContext) recordingStream.audioContext.close();
+                if (recordingStream.micStream) recordingStream.micStream.getTracks().forEach(t => t.stop());
             };
 
             displayStream.getVideoTracks()[0].onended = () => stopRecording();

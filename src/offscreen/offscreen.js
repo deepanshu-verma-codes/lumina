@@ -47,8 +47,8 @@ async function startRecording(streamId, options) {
     console.log('[OFFSCREEN] startRecording() called with streamId:', streamId);
     
     try {
-        // 1. Acquire Stream
-        stream = await navigator.mediaDevices.getUserMedia({
+        // 1. Acquire Screen Stream
+        const screenStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 mandatory: {
                     chromeMediaSource: 'desktop',
@@ -63,21 +63,63 @@ async function startRecording(streamId, options) {
             }
         });
 
-        console.log('[OFFSCREEN] Stream acquired, tracks:', stream.getTracks().length);
+        console.log('[OFFSCREEN] Screen stream acquired');
 
-        // 2. Add Mic if requested
+        // 2. Acquire Mic Stream if requested
+        let micStream = null;
         if (options.mic) {
             try {
-                console.log('[OFFSCREEN] Adding microphone track...');
-                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                micStream.getAudioTracks().forEach(track => stream.addTrack(track));
-                console.log('[OFFSCREEN] Microphone track added');
+                console.log('[OFFSCREEN] Acquiring microphone...');
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+                console.log('[OFFSCREEN] Microphone acquired');
             } catch (e) {
                 console.error('[OFFSCREEN] Mic access failed:', e);
             }
         }
 
-        // 3. Setup Recorder
+        // 3. Merge Audio Tracks using AudioContext
+        const audioContext = new AudioContext();
+        const destination = audioContext.createMediaStreamDestination();
+        let hasAudio = false;
+
+        // Connect Screen Audio
+        if (screenStream.getAudioTracks().length > 0) {
+            const screenSource = audioContext.createMediaStreamSource(new MediaStream([screenStream.getAudioTracks()[0]]));
+            screenSource.connect(destination);
+            hasAudio = true;
+            console.log('[OFFSCREEN] Screen audio connected to mixer');
+        }
+
+        // Connect Mic Audio
+        if (micStream && micStream.getAudioTracks().length > 0) {
+            const micSource = audioContext.createMediaStreamSource(new MediaStream([micStream.getAudioTracks()[0]]));
+            micSource.connect(destination);
+            hasAudio = true;
+            console.log('[OFFSCREEN] Microphone audio connected to mixer');
+        }
+
+        // 4. Create Final Combined Stream
+        const tracks = [...screenStream.getVideoTracks()];
+        if (hasAudio) {
+            tracks.push(...destination.stream.getAudioTracks());
+        }
+        
+        stream = new MediaStream(tracks);
+        
+        // Store references for cleanup
+        stream.originalScreenStream = screenStream;
+        stream.originalMicStream = micStream;
+        stream.audioContext = audioContext;
+
+        console.log('[OFFSCREEN] Final stream created with', stream.getTracks().length, 'tracks');
+
+        // 5. Setup Recorder
         chunks = [];
         const mimeType = 'video/webm; codecs=vp9';
         recorder = new MediaRecorder(stream, { 
@@ -87,24 +129,18 @@ async function startRecording(streamId, options) {
         recorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) {
                 chunks.push(e.data);
-                console.log('[OFFSCREEN] Data chunk collected, size:', e.data.size, 'Total chunks:', chunks.length);
             }
         };
 
         recorder.onstop = async () => {
-            console.log('[OFFSCREEN] recorder.onstop fired. Total chunks:', chunks.length);
+            console.log('[OFFSCREEN] recorder.onstop fired');
             await finalizeRecording();
         };
 
-        recorder.onerror = (e) => {
-            console.error('[OFFSCREEN] MediaRecorder ERROR:', e);
-        };
+        // 6. Start
+        recorder.start(1000);
+        console.log('[OFFSCREEN] Recorder started');
 
-        // 4. Start
-        recorder.start(1000); // Timeslice of 1s to ensure data available frequently
-        console.log('[OFFSCREEN] recorder.start() executed, state:', recorder.state);
-
-        // Handle stream ending (e.g. user clicks "Stop sharing")
         stream.getVideoTracks()[0].onended = () => {
             console.log('[OFFSCREEN] Stream ended via UI');
             stopRecording();
@@ -120,14 +156,21 @@ function stopRecording() {
     console.log('[OFFSCREEN] stopRecording() called');
     if (recorder && recorder.state !== 'inactive') {
         recorder.stop();
-        console.log('[OFFSCREEN] recorder.stop() called');
-    } else {
-        console.warn('[OFFSCREEN] Cannot stop, recorder is:', recorder?.state);
     }
 
     if (stream) {
         stream.getTracks().forEach(t => t.stop());
-        console.log('[OFFSCREEN] Stream tracks stopped');
+        
+        // Cleanup original streams and audio context
+        if (stream.originalScreenStream) {
+            stream.originalScreenStream.getTracks().forEach(t => t.stop());
+        }
+        if (stream.originalMicStream) {
+            stream.originalMicStream.getTracks().forEach(t => t.stop());
+        }
+        if (stream.audioContext) {
+            stream.audioContext.close();
+        }
     }
 }
 

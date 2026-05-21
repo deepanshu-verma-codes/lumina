@@ -4,6 +4,7 @@ export const RecordingService = {
     screenStream: null,
     micStream: null,
     combinedStream: null,
+    audioContext: null,
     state: 'inactive', // inactive, recording, paused
 
     async ensurePermissions() {
@@ -28,31 +29,48 @@ export const RecordingService = {
 
     async startRecording(options = { mic: true }) {
         try {
-            const tracks = [];
-
-            // 1. Get Mic Stream first if requested
-            if (options.mic) {
-                try {
-                    this.micStream = await navigator.mediaDevices.getUserMedia({
-                        audio: true
-                    });
-                    
-                    const micTrack = this.micStream.getAudioTracks()[0];
-                    if (micTrack) {
-                        tracks.push(micTrack);
-                    }
-                } catch (micErr) {
-                    console.warn('Microphone access denied or not available:', micErr);
-                }
-            }
-
-            // 2. Get Screen Stream
+            // 1. Get Screen Stream
             this.screenStream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
                 audio: true // This captures system/tab audio
             });
 
-            tracks.push(...this.screenStream.getTracks());
+            // 2. Get Mic Stream if requested
+            if (options.mic) {
+                try {
+                    this.micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    });
+                } catch (micErr) {
+                    console.warn('Microphone access denied or not available:', micErr);
+                }
+            }
+
+            // 3. Merge Audio Tracks using AudioContext
+            this.audioContext = new AudioContext();
+            const destination = this.audioContext.createMediaStreamDestination();
+            let hasAudio = false;
+
+            if (this.screenStream.getAudioTracks().length > 0) {
+                const source = this.audioContext.createMediaStreamSource(new MediaStream([this.screenStream.getAudioTracks()[0]]));
+                source.connect(destination);
+                hasAudio = true;
+            }
+
+            if (this.micStream && this.micStream.getAudioTracks().length > 0) {
+                const source = this.audioContext.createMediaStreamSource(new MediaStream([this.micStream.getAudioTracks()[0]]));
+                source.connect(destination);
+                hasAudio = true;
+            }
+
+            const tracks = [...this.screenStream.getVideoTracks()];
+            if (hasAudio) {
+                tracks.push(...destination.stream.getAudioTracks());
+            }
 
             this.combinedStream = new MediaStream(tracks);
             this.recordedChunks = [];
@@ -108,6 +126,10 @@ export const RecordingService = {
         if (this.micStream) {
             this.micStream.getTracks().forEach(track => track.stop());
             this.micStream = null;
+        }
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
         }
         this.combinedStream = null;
     },
