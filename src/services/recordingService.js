@@ -6,17 +6,31 @@ export const RecordingService = {
     combinedStream: null,
     state: 'inactive', // inactive, recording, paused
 
+    async ensurePermissions() {
+        const existingContexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT']
+        });
+
+        if (existingContexts.length > 0) return;
+
+        await chrome.offscreen.createDocument({
+            url: 'src/offscreen/offscreen.html',
+            reasons: ['USER_MEDIA'],
+            justification: 'To request microphone access for recording.'
+        });
+
+        // Send message to trigger the prompt
+        await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            action: 'getMicrophone'
+        });
+    },
+
     async startRecording(options = { mic: true }) {
         try {
-            // 1. Get Screen Stream
-            this.screenStream = await navigator.mediaDevices.getDisplayMedia({
-                video: true,
-                audio: true // This captures system/tab audio
-            });
+            const tracks = [];
 
-            const tracks = [...this.screenStream.getTracks()];
-
-            // 2. Get Mic Stream if requested
+            // 1. Get Mic Stream first if requested
             if (options.mic) {
                 try {
                     this.micStream = await navigator.mediaDevices.getUserMedia({
@@ -31,6 +45,14 @@ export const RecordingService = {
                     console.warn('Microphone access denied or not available:', micErr);
                 }
             }
+
+            // 2. Get Screen Stream
+            this.screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: true // This captures system/tab audio
+            });
+
+            tracks.push(...this.screenStream.getTracks());
 
             this.combinedStream = new MediaStream(tracks);
             this.recordedChunks = [];
@@ -101,7 +123,7 @@ export const RecordingService = {
 
     download(url, filename) {
         if (!filename) {
-            filename = 'web-snap-' + Date.now() + '.webm';
+            filename = 'lumina-snap-' + Date.now() + '.webm';
         }
         const a = document.createElement('a');
         a.href = url;

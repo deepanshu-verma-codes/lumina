@@ -1,12 +1,32 @@
 :root {
     --primary-color: #625df5;
     --primary-hover: #4e4ad9;
-    --bg-dark: #121212;
-    --bg-surface: #1e1e1e;
+    --bg-dark: #0d0d0d;
+    --bg-surface: #141414;
+    --bg-card: #1c1c1c;
     --text-main: #ffffff;
-    --text-muted: #a0a0a0;
+    --text-muted: #888888;
+    --text-dim: #555555;
     --danger: #ff4d4d;
     --success: #00c853;
-    --border-radius: 12px;
-    --transition-speed: 0.3s;
+    
+    /* Spacing System */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 12px;
+    --space-lg: 16px;
+    --space-xl: 20px;
+    --space-2xl: 24px;
+    
+    /* Rounded Radius */
+    --radius-main: 22px;
+    --radius-controller: 18px;
+    --radius-card: 14px;
+    --radius-btn: 10px;
+    --radius-input: 8px;
+    
+    --transition-soft: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --shadow-premium: 0 8px 24px rgba(0,0,0,0.18);
+    --glass-effect: blur(14px);
+    --border-subtle: 1px solid rgba(255, 255, 255, 0.06);
 }

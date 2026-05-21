@@ -1,31 +1,20 @@
-chrome.commands.onCommand.addListener((command) => {
-    if (command === "take-screenshot") {
-        captureScreenshot();
-    } else if (command === "toggle-recording") {
-        // Notify popup if it's open, or handle via injected script
-        chrome.runtime.sendMessage({ action: "toggleRecording" });
-    }
+// BACKGROUND ORCHESTRATOR
+// Since recording is now handled in popup.js, background.js is primarily for content script messaging if needed, or screenshots.
+
+console.log('[BACKGROUND] Service Worker Started');
+
+chrome.runtime.onInstalled.addListener(() => {
+    console.log('[BACKGROUND] Extension installed');
 });
 
-async function captureScreenshot() {
-    try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab) return;
+// We can keep this minimal as popup.js now owns the MediaRecorder pipeline.
+// If content scripts still need to send messages to background, they can be handled here.
 
-        chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
-            if (chrome.runtime.lastError) {
-                console.error(chrome.runtime.lastError);
-                return;
-            }
-            
-            const timestamp = new Date().getTime();
-            chrome.downloads.download({
-                url: dataUrl,
-                filename: `lumina-screenshot-${timestamp}.png`,
-                saveAs: false
-            });
-        });
-    } catch (err) {
-        console.error("Failed to capture screenshot:", err);
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // Left for future messaging (e.g. screenshot handling)
+    if (request.action === 'takeScreenshot') {
+        // Screenshot logic would go here
+        sendResponse({ success: true });
     }
-}
+    return true;
+});
