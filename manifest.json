@@ -8,7 +8,9 @@
         "storage",
         "tabs",
         "desktopCapture",
-        "downloads"
+        "downloads",
+        "scripting",
+        "offscreen"
     ],
     "action": {
         "default_popup": "src/popup/popup.html",

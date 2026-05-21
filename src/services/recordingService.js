@@ -4,7 +4,28 @@ export const RecordingService = {
     screenStream: null,
     micStream: null,
     combinedStream: null,
+    audioContext: null,
     state: 'inactive', // inactive, recording, paused
+
+    async ensurePermissions() {
+        const existingContexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT']
+        });
+
+        if (existingContexts.length > 0) return;
+
+        await chrome.offscreen.createDocument({
+            url: 'src/offscreen/offscreen.html',
+            reasons: ['USER_MEDIA'],
+            justification: 'To request microphone access for recording.'
+        });
+
+        // Send message to trigger the prompt
+        await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            action: 'getMicrophone'
+        });
+    },
 
     async startRecording(options = { mic: true }) {
         try {
@@ -14,22 +35,41 @@ export const RecordingService = {
                 audio: true // This captures system/tab audio
             });
 
-            const tracks = [...this.screenStream.getTracks()];
-
             // 2. Get Mic Stream if requested
             if (options.mic) {
                 try {
                     this.micStream = await navigator.mediaDevices.getUserMedia({
-                        audio: true
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
                     });
-                    
-                    const micTrack = this.micStream.getAudioTracks()[0];
-                    if (micTrack) {
-                        tracks.push(micTrack);
-                    }
                 } catch (micErr) {
                     console.warn('Microphone access denied or not available:', micErr);
                 }
+            }
+
+            // 3. Merge Audio Tracks using AudioContext
+            this.audioContext = new AudioContext();
+            const destination = this.audioContext.createMediaStreamDestination();
+            let hasAudio = false;
+
+            if (this.screenStream.getAudioTracks().length > 0) {
+                const source = this.audioContext.createMediaStreamSource(new MediaStream([this.screenStream.getAudioTracks()[0]]));
+                source.connect(destination);
+                hasAudio = true;
+            }
+
+            if (this.micStream && this.micStream.getAudioTracks().length > 0) {
+                const source = this.audioContext.createMediaStreamSource(new MediaStream([this.micStream.getAudioTracks()[0]]));
+                source.connect(destination);
+                hasAudio = true;
+            }
+
+            const tracks = [...this.screenStream.getVideoTracks()];
+            if (hasAudio) {
+                tracks.push(...destination.stream.getAudioTracks());
             }
 
             this.combinedStream = new MediaStream(tracks);
@@ -87,6 +127,10 @@ export const RecordingService = {
             this.micStream.getTracks().forEach(track => track.stop());
             this.micStream = null;
         }
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+        }
         this.combinedStream = null;
     },
 
@@ -101,7 +145,7 @@ export const RecordingService = {
 
     download(url, filename) {
         if (!filename) {
-            filename = 'web-snap-' + Date.now() + '.webm';
+            filename = 'lumina-snap-' + Date.now() + '.webm';
         }
         const a = document.createElement('a');
         a.href = url;
